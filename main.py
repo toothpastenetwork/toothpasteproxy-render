@@ -1,8 +1,9 @@
-from quart import Quart, request, make_response, Response
+from quart import Quart, request, make_response
 from urllib.parse import urljoin, quote, unquote
 from bs4 import BeautifulSoup
 import re
 from utils.renderer import render_page
+from utils.browser import shutdown_browser
 
 app = Quart(__name__)
 
@@ -34,11 +35,19 @@ def rewrite_html(html, base_url):
 
     return str(soup)
 
+@app.before_serving
+async def startup():
+    pass  # placeholder if browser warm-up is desired
+
+@app.after_serving
+async def cleanup():
+    await shutdown_browser()
+
 @app.route("/", methods=["GET"])
 async def proxy():
     target = request.args.get("url")
     if not target:
-        return "<h2>🧪 Proxy Browser Running — use ?url=https://example.com</h2>"
+        return "<h2>The proxy is online, but a link is required. Please check the URL and try again.</h2>"
 
     target = unquote(target)
     try:
