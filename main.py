@@ -50,11 +50,17 @@ async def proxy():
         return "<h2>The proxy is online, but a link is required. Please check the URL and try again.</h2>"
 
     target = unquote(target)
+
+    async def report_progress(percent):
+        print(f"Rendering progress: {percent}%")
+
     try:
-        html = await render_page(target)
+        html = await render_page(target, progress_callback=report_progress)
         rewritten = rewrite_html(html, target)
         response = await make_response(rewritten)
         response.headers["Content-Type"] = "text/html"
         return response
     except Exception as e:
         return f"<pre>Proxy error:\n{e}</pre>"
+
+
