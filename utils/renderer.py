@@ -36,8 +36,14 @@ async def render_page(url):
         browser = await get_browser()
         page = await browser.new_page()
         try:
-            await page.goto(url, wait_until="networkidle")
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+            except Exception:
+                # soft fallback: retry with 'load'
+                await page.goto(url, wait_until="load", timeout=15000)
+
             content = await page.content()
             return content
         finally:
             await page.close()
+
