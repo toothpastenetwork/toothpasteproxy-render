@@ -1,9 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from urllib.parse import urljoin, quote, unquote
-from utils.renderer import render_page
-from utils.browser import get_browser
 from utils.cache import get_or_render_cached
+from utils.browser import get_browser
 from bs4 import BeautifulSoup
 import re
 import asyncio
@@ -16,12 +15,11 @@ PREWARM_URLS = [
 ]
 
 @app.on_event("startup")
-async def warm_browser():
+async def warm_up():
     await get_browser()
     print("✅ Browser warmed.")
     for url in PREWARM_URLS:
         asyncio.create_task(get_or_render_cached(url))
-        print(f"⏳ Prewarming: {url}")
 
 def rewrite_url(base_url, url):
     if not url or url.startswith(("data:", "javascript:")):
@@ -53,7 +51,7 @@ def rewrite_html(html, base_url):
 async def proxy(request: Request):
     target = request.query_params.get("url")
     if not target:
-        return "<h2>The proxy is online. Use ?url=...</h2>"
+        return "<h2>The proxy is online. Use ?url=https://example.com</h2>"
 
     target = unquote(target)
     try:
