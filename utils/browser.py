@@ -10,7 +10,6 @@ async def get_browser():
         _playwright = await async_playwright().start()
         _browser = await _playwright.chromium.launch(
             headless=True,
-            ignore_https_errors=True,
             args=[
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
@@ -33,5 +32,7 @@ async def get_browser_context():
     global _browser_context
     browser = await get_browser()
     if _browser_context is None:
-        _browser_context = await browser.new_context()
+        _browser_context = await browser.new_context(
+            ignore_https_errors=True  # ✅ Properly placed here
+        )
     return _browser_context
