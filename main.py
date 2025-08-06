@@ -1,12 +1,11 @@
-from quart import Quart, request, make_response
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from urllib.parse import urljoin, quote, unquote
+from utils.renderer import render_page
 from bs4 import BeautifulSoup
 import re
 
-from utils.renderer import render_page
-from utils.browser import shutdown_browser
-
-app = Quart(__name__)
+app = FastAPI()
 
 def rewrite_url(base_url, url):
     if not url or url.startswith(("data:", "javascript:")):
@@ -34,26 +33,16 @@ def rewrite_html(html, base_url):
             )
     return str(soup)
 
-@app.before_serving
-async def startup():
-    pass
-
-@app.after_serving
-async def cleanup():
-    await shutdown_browser()
-
-@app.route("/", methods=["GET"])
-async def proxy():
-    target = request.args.get("url")
+@app.get("/", response_class=HTMLResponse)
+async def proxy(request: Request):
+    target = request.query_params.get("url")
     if not target:
-        return "<h2>The proxy is online, but a link is required. Please check the URL and try again.</h2>"
+        return "<h2>The proxy is online. Provide a ?url=...</h2>"
 
     target = unquote(target)
     try:
         html = await render_page(target)
         rewritten = rewrite_html(html, target)
-        response = await make_response(rewritten)
-        response.headers["Content-Type"] = "text/html"
-        return response
+        return HTMLResponse(content=rewritten, media_type="text/html")
     except Exception as e:
-        return f"<pre>Proxy error:\n{e}</pre>"
+        return HTMLResponse(content=f"<pre>Proxy error:\n{e}</pre>", media_type="text/html")
