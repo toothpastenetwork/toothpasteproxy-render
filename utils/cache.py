@@ -5,10 +5,6 @@ from .renderer import render_page
 def _key_safe(url: str) -> str:
     return url.strip().lower()
 
-@lru_cache(maxsize=64)
-def sync_cache_key(url: str) -> str:
-    return url.strip().lower()
-
 _cache = {}
 
 async def get_or_render_cached(url: str) -> str:
