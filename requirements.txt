@@ -1,5 +1,5 @@
-quart
+fastapi
+uvicorn[standard]
+requests
 beautifulsoup4
 playwright
-hypercorn
-requests
