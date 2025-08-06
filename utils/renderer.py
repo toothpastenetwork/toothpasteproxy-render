@@ -1,10 +1,15 @@
 import requests
 from bs4 import BeautifulSoup
-from .browser import get_browser
+from .browser import get_page
+import asyncio
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 }
+
+BLOCKED_TYPES = [
+    "image", "stylesheet", "font", "media", "websocket", "xhr", "fetch", "ping", "manifest", "other"
+]
 
 def is_js_heavy_content(html):
     soup = BeautifulSoup(html, "html.parser")
@@ -26,17 +31,19 @@ async def render_page(url):
             raise Exception("Dynamic content detected")
         return html
     except Exception:
-        browser = await get_browser()
-        page = await browser.new_page()
+        page = await get_page()
 
-        # Block images, fonts, media
-        await page.route("**/*", lambda route, request: (
-            route.abort() if request.resource_type in ["image", "font", "stylesheet", "media"] else route.continue_()
+        # Block unnecessary resources
+        await page.route("**/*", lambda route, req: (
+            route.abort() if req.resource_type in BLOCKED_TYPES else route.continue_()
         ))
 
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=10000)
-            content = await page.content()
-            return content
-        finally:
-            await page.close()
+            await asyncio.wait_for(
+                page.goto(url, wait_until="load", timeout=10000),
+                timeout=4.0  # bail out early if loading is too slow
+            )
+        except asyncio.TimeoutError:
+            print("[WARN] Page took too long. Returning partial content...")
+
+        return await page.content()
