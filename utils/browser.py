@@ -30,9 +30,19 @@ async def get_browser():
 
 async def get_browser_context():
     global _browser_context
+
     browser = await get_browser()
-    if _browser_context is None:
+
+    try:
+        # 🧠 if context is dead, this will raise
+        if _browser_context is None or _browser_context.is_closed():
+            raise Exception("Context missing or closed")
+
+        return _browser_context
+
+    except:
+        # 🔁 Recreate context if dead
         _browser_context = await browser.new_context(
-            ignore_https_errors=True  # ✅ Properly placed here
+            ignore_https_errors=True
         )
-    return _browser_context
+        return _browser_context
