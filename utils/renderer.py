@@ -1,6 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
-from .browser import get_page
+from .browser import get_browser_context
 import asyncio
 
 HEADERS = {
@@ -35,9 +35,9 @@ async def render_page(url):
             raise Exception("Dynamic content detected")
         return html
     except Exception:
-        page = await get_page()
+        context = await get_browser_context()
+        page = await context.new_page()
 
-        # Aggressive resource filtering
         await page.route("**/*", lambda route, request: (
             route.abort() if (
                 request.resource_type in BLOCKED_TYPES or
@@ -53,4 +53,6 @@ async def render_page(url):
         except asyncio.TimeoutError:
             print("[WARN] Timeout hit — returning partial content")
 
-        return await page.content()
+        content = await page.content()
+        await page.close()
+        return content
