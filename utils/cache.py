@@ -12,10 +12,10 @@ async def get_or_render_cached(url: str) -> str:
     if key in cache:
         return cache[key]
     html = await render_page(url)
-    cache.set(key, html, expire=86400)  # 1 day TTL
+    cache.set(key, html, expire=86400)  # 1-day TTL
     return html
 
-# Optional: Background refresh
+# Optional background refresh
 def refresh_async(url: str):
     key = get_key(url)
     async def _refresh():
