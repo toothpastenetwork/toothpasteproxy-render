@@ -6,27 +6,13 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 }
 
-JS_KEYWORDS = [
-    "React", "Next.js", "Vue", "Svelte", "Angular", "Webpack", "Canvas", "WebGL",
-    "phaser", "unityWeb", "three.min.js", "pixi.min.js", "Babylon"
-]
-
-DYNAMIC_TAGS = ["canvas", "svg", "video", "webgl"]
-
 def is_js_heavy_content(html):
     soup = BeautifulSoup(html, "html.parser")
-    body = soup.body
-    if not body or len(body.get_text(strip=True)) < 80:
+    if soup.find("canvas") or soup.find("webgl") or len(soup.find_all("script")) > 10:
         return True
-    for tag in DYNAMIC_TAGS:
-        if soup.find(tag):
-            return True
-    scripts = soup.find_all("script")
-    js_heavy = sum(1 for s in scripts if s.get("src") or s.get("type") == "module" or s.get("defer") or s.get("async"))
-    if js_heavy >= 5:
+    if not soup.body or len(soup.body.get_text(strip=True)) < 50:
         return True
-    html_lower = html.lower()
-    return any(keyword.lower() in html_lower for keyword in JS_KEYWORDS)
+    return False
 
 def fetch_html_with_requests(url: str) -> str:
     resp = requests.get(url, headers=HEADERS, timeout=10)
@@ -42,8 +28,15 @@ async def render_page(url):
     except Exception:
         browser = await get_browser()
         page = await browser.new_page()
+
+        # Block images, fonts, media
+        await page.route("**/*", lambda route, request: (
+            route.abort() if request.resource_type in ["image", "font", "stylesheet", "media"] else route.continue_()
+        ))
+
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=15000)
-            return await page.content()
+            await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+            content = await page.content()
+            return content
         finally:
             await page.close()
