@@ -11,6 +11,10 @@ BLOCKED_TYPES = [
     "image", "stylesheet", "font", "media", "websocket", "xhr", "fetch", "ping", "manifest", "other"
 ]
 
+BLOCKED_DOMAINS = [
+    "googletag", "doubleclick", "facebook", "ytimg", "ads.", "tracking", "twitter", "cloudflareinsights"
+]
+
 def is_js_heavy_content(html):
     soup = BeautifulSoup(html, "html.parser")
     if soup.find("canvas") or soup.find("webgl") or len(soup.find_all("script")) > 10:
@@ -33,17 +37,20 @@ async def render_page(url):
     except Exception:
         page = await get_page()
 
-        # Block unnecessary resources
-        await page.route("**/*", lambda route, req: (
-            route.abort() if req.resource_type in BLOCKED_TYPES else route.continue_()
+        # Aggressive resource filtering
+        await page.route("**/*", lambda route, request: (
+            route.abort() if (
+                request.resource_type in BLOCKED_TYPES or
+                any(domain in request.url for domain in BLOCKED_DOMAINS)
+            ) else route.continue_()
         ))
 
         try:
             await asyncio.wait_for(
                 page.goto(url, wait_until="load", timeout=10000),
-                timeout=4.0  # bail out early if loading is too slow
+                timeout=4.0
             )
         except asyncio.TimeoutError:
-            print("[WARN] Page took too long. Returning partial content...")
+            print("[WARN] Timeout hit — returning partial content")
 
         return await page.content()
