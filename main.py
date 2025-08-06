@@ -6,8 +6,22 @@ from utils.browser import get_browser
 from utils.cache import get_or_render_cached
 from bs4 import BeautifulSoup
 import re
+import asyncio
 
 app = FastAPI()
+
+PREWARM_URLS = [
+    "https://example.com",
+    "https://en.wikipedia.org/wiki/Main_Page",
+]
+
+@app.on_event("startup")
+async def warm_browser():
+    await get_browser()
+    print("✅ Browser warmed.")
+    for url in PREWARM_URLS:
+        asyncio.create_task(get_or_render_cached(url))
+        print(f"⏳ Prewarming: {url}")
 
 def rewrite_url(base_url, url):
     if not url or url.startswith(("data:", "javascript:")):
@@ -48,8 +62,3 @@ async def proxy(request: Request):
         return HTMLResponse(content=rewritten, media_type="text/html")
     except Exception as e:
         return HTMLResponse(content=f"<pre>Proxy error:\n{e}</pre>", media_type="text/html")
-
-@app.on_event("startup")
-async def warm_browser():
-    await get_browser()
-    print("✅ Browser warmed and ready.")
