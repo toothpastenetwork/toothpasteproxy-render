@@ -26,22 +26,26 @@ async def get_browser():
                 "--remote-debugging-port=0"
             ]
         )
+    elif _browser.is_closed():
+        # Reopen if Render killed it
+        print("[RESTART] Browser was closed, restarting...")
+        await _playwright.stop()
+        _browser = None
+        _playwright = None
+        return await get_browser()
+
     return _browser
 
 async def get_browser_context():
     global _browser_context
-
     browser = await get_browser()
 
     try:
-        # 🧠 if context is dead, this will raise
         if _browser_context is None or _browser_context.is_closed():
             raise Exception("Context missing or closed")
-
         return _browser_context
-
     except:
-        # 🔁 Recreate context if dead
+        print("[RESTART] Context was closed, restarting...")
         _browser_context = await browser.new_context(
             ignore_https_errors=True
         )
