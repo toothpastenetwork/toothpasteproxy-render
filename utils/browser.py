@@ -2,30 +2,36 @@ from playwright.async_api import async_playwright
 
 _browser = None
 _playwright = None
-_page = None
+_browser_context = None
 
 async def get_browser():
     global _browser, _playwright
     if _browser is None:
         _playwright = await async_playwright().start()
-        _browser = await _playwright.chromium.launch(headless=True, args=["--disable-dev-shm-usage"])
+        _browser = await _playwright.chromium.launch(
+            headless=True,
+            ignore_https_errors=True,
+            args=[
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--disable-extensions",
+                "--disable-translate",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--no-sandbox",
+                "--no-zygote",
+                "--single-process",
+                "--disable-features=site-per-process",
+                "--remote-debugging-port=0"
+            ]
+        )
     return _browser
 
-async def get_page():
-    global _page
+async def get_browser_context():
+    global _browser_context
     browser = await get_browser()
-    if _page is None:
-        _page = await browser.new_page()
-    return _page
-
-async def shutdown_browser():
-    global _browser, _playwright, _page
-    if _page:
-        await _page.close()
-        _page = None
-    if _browser:
-        await _browser.close()
-        _browser = None
-    if _playwright:
-        await _playwright.stop()
-        _playwright = None
+    if _browser_context is None:
+        _browser_context = await browser.new_context()
+    return _browser_context
