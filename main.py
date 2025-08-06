@@ -1,14 +1,14 @@
-from quart import Quart, request, make_response, jsonify, render_template_string
+from quart import Quart, request, make_response, jsonify
 from urllib.parse import urljoin, quote, unquote
 from bs4 import BeautifulSoup
 import re
 import asyncio
-
 from utils.renderer import render_page
 from utils.browser import shutdown_browser
+from collections import defaultdict
 
 app = Quart(__name__)
-progress_store = {}
+progress_store = defaultdict(int)
 
 def rewrite_url(base_url, url):
     if not url or url.startswith(("data:", "javascript:")):
@@ -17,7 +17,6 @@ def rewrite_url(base_url, url):
 
 def rewrite_html(html, base_url):
     soup = BeautifulSoup(html, "html.parser")
-
     for tag, attr in {
         "a": "href", "img": "src", "script": "src", "link": "href",
         "iframe": "src", "form": "action"
@@ -58,13 +57,13 @@ async def proxy():
         return "<h2>The proxy is online, but a link is required. Please check the URL and try again.</h2>"
 
     target = unquote(target)
-    task_id = str(hash(target))  # crude cache key
+    task_id = str(hash(target))
 
-    # Send loading page first
+    # If AJAX polling
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-        # Real fetch from polling JS
         async def report_progress(percent):
             progress_store[task_id] = percent
+            print(f"[SERVER] Progress update for {task_id}: {percent}%")
 
         try:
             html = await render_page(target, progress_callback=report_progress)
@@ -75,12 +74,13 @@ async def proxy():
         except Exception as e:
             return f"<pre>Proxy error:\n{e}</pre>"
 
-    # First visit: render loading page
+    # Otherwise: serve loading bar
+    quoted = quote(target)
     loading_html = f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Loading {target}</title>
+        <title>Rendering {target}</title>
         <style>
             body {{ font-family: sans-serif; text-align: center; padding: 5em; }}
             .bar {{ width: 100%%; background: #ddd; height: 30px; border-radius: 4px; margin-top: 20px; }}
@@ -92,16 +92,24 @@ async def proxy():
         <div class="bar"><div class="fill" id="fill"></div></div>
         <p id="percent">0%</p>
         <script>
+            console.log("[Client] Starting progress polling...");
             async function poll() {{
-                let res = await fetch("/progress/{task_id}");
-                let data = await res.json();
-                let percent = data.progress;
-                document.getElementById("fill").style.width = percent + "%";
-                document.getElementById("percent").innerText = percent + "%";
-                if (percent >= 100) {{
-                    window.location.href = "/?url={quote(target)}";
-                }} else {{
-                    setTimeout(poll, 500);
+                try {{
+                    let res = await fetch("/progress/{task_id}");
+                    let data = await res.json();
+                    let percent = data.progress;
+                    console.log("[Client] Fetched progress:", percent);
+                    document.getElementById("fill").style.width = percent + "%";
+                    document.getElementById("percent").innerText = percent + "%";
+                    if (percent >= 100) {{
+                        console.log("[Client] Render complete. Redirecting...");
+                        window.location.href = "/?url={quoted}";
+                    }} else {{
+                        setTimeout(poll, 500);
+                    }}
+                }} catch (err) {{
+                    console.error("[Client] Polling failed:", err);
+                    setTimeout(poll, 1000);
                 }}
             }}
             poll();
