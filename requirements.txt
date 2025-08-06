@@ -3,3 +3,4 @@ uvicorn[standard]
 requests
 playwright
 beautifulsoup4
+diskcache
