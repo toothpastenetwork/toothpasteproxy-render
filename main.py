@@ -2,6 +2,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from urllib.parse import urljoin, quote, unquote
 from utils.renderer import render_page
+from utils.browser import get_browser
+from utils.cache import get_or_render_cached
 from bs4 import BeautifulSoup
 import re
 
@@ -37,12 +39,17 @@ def rewrite_html(html, base_url):
 async def proxy(request: Request):
     target = request.query_params.get("url")
     if not target:
-        return "<h2>The proxy is online. Provide a ?url=...</h2>"
+        return "<h2>The proxy is online. Use ?url=...</h2>"
 
     target = unquote(target)
     try:
-        html = await render_page(target)
+        html = await get_or_render_cached(target)
         rewritten = rewrite_html(html, target)
         return HTMLResponse(content=rewritten, media_type="text/html")
     except Exception as e:
         return HTMLResponse(content=f"<pre>Proxy error:\n{e}</pre>", media_type="text/html")
+
+@app.on_event("startup")
+async def warm_browser():
+    await get_browser()
+    print("✅ Browser warmed and ready.")
