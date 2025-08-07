@@ -1,58 +1,49 @@
 import requests
 from bs4 import BeautifulSoup
-from .browser import get_browser_context
-import asyncio
+from utils.browser import get_browser_context
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
-}
-
-BLOCKED_TYPES = [
-    "image", "stylesheet", "font", "media", "websocket", "xhr", "fetch", "ping", "manifest", "other"
-]
-
-BLOCKED_DOMAINS = [
-    "googletag", "doubleclick", "facebook", "ytimg", "ads.", "tracking", "twitter", "cloudflareinsights"
-]
-
-def is_js_heavy_content(html):
+def is_js_heavy(html: str) -> bool:
     soup = BeautifulSoup(html, "html.parser")
-    if soup.find("canvas") or soup.find("webgl") or len(soup.find_all("script")) > 10:
-        return True
-    if not soup.body or len(soup.body.get_text(strip=True)) < 50:
-        return True
-    return False
+    scripts = soup.find_all("script", src=True)
+    iframes = soup.find_all("iframe", src=True)
+    return (
+        len(scripts) + len(iframes) >= 2 or
+        "webpack" in html or
+        "polyfill" in html or
+        "googletag" in html or
+        "data-reactroot" in html or
+        "application/ld+json" in html
+    )
 
-def fetch_html_with_requests(url: str) -> str:
-    resp = requests.get(url, headers=HEADERS, timeout=10)
-    resp.raise_for_status()
-    return resp.text
-
-async def render_page(url):
+async def render_page(url: str) -> str:
     try:
-        html = fetch_html_with_requests(url)
-        if is_js_heavy_content(html):
-            raise Exception("Dynamic content detected")
-        return html
-    except Exception:
-        context = await get_browser_context()
-        page = await context.new_page()
+        resp = requests.get(url, timeout=4, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        })
+        html = resp.text
+        if not is_js_heavy(html):
+            print(f"[STATIC] Loaded fast via requests: {url}")
+            return html
+        else:
+            print(f"[BROWSER] Switching to browser for JS-heavy page: {url}")
+    except Exception as e:
+        print(f"[FALLBACK] Requests failed, switching to browser: {e}")
 
-        await page.route("**/*", lambda route, request: (
-            route.abort() if (
-                request.resource_type in BLOCKED_TYPES or
-                any(domain in request.url for domain in BLOCKED_DOMAINS)
-            ) else route.continue_()
-        ))
+    context = await get_browser_context()
+    page = await context.new_page()
 
-        try:
-            await asyncio.wait_for(
-                page.goto(url, wait_until="load", timeout=10000),
-                timeout=4.0
-            )
-        except asyncio.TimeoutError:
-            print("[WARN] Timeout hit — returning partial content")
+    await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
+    await page.route("**/*", lambda route, req: route.continue_())
+
+    try:
+        await page.goto(url, wait_until="networkidle")
         content = await page.content()
+        print(f"[RENDERED] Loaded via Playwright: {url}")
+    except Exception as err:
+        print(f"[ERROR] Failed to render via browser: {url}\n{err}")
+        content = "<h2>Failed to load page</h2>"
+    finally:
         await page.close()
-        return content
+
+    return content
