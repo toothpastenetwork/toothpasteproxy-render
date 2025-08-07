@@ -9,8 +9,7 @@ async def get_browser():
 
     try:
         if _browser:
-            # Test with dummy context call
-            await _browser.version()  # ✅ safe test to detect crash
+            await _browser.version()  # ✅ Check if browser is alive
             return _browser
     except Exception:
         print("[RESTART] Browser appears dead. Restarting...")
@@ -54,6 +53,10 @@ async def get_browser_context():
     except:
         print("[RESTART] Context was closed, restarting...")
         _browser_context = await browser.new_context(
-            ignore_https_errors=True
+            ignore_https_errors=True,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            locale="en-US",
+            timezone_id="America/New_York",
+            viewport={"width": 1280, "height": 800"}
         )
         return _browser_context
