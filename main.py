@@ -27,6 +27,66 @@ def rewrite_url(base_url, url):
     full = urljoin(base_url, url)
     return "/?url=" + quote(full)
 
+def inject_proxy_script(base_url):
+    return f"""
+<script>
+(function() {{
+    const PROXY = "/?url=";
+    const rewrite = (u) => PROXY + encodeURIComponent(new URL(u, "{base_url}").href);
+
+    // Smart fetch override
+    const originalFetch = window.fetch;
+    window.fetch = function(input, init) {{
+        const url = typeof input === 'string' ? input : input.url;
+        return originalFetch(input, init).catch(err => {{
+            if (err instanceof TypeError && err.message.includes("Failed to fetch")) {{
+                console.warn("🔁 Retrying via proxy:", url);
+                return originalFetch(rewrite(url), init);
+            }}
+            throw err;
+        }});
+    }};
+
+    // Smart XHR override
+    const originalOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url, ...rest) {{
+        try {{
+            return originalOpen.call(this, method, url, ...rest);
+        }} catch (e) {{
+            const proxyUrl = rewrite(url);
+            console.warn("🔁 Retrying XHR via proxy:", url);
+            return originalOpen.call(this, method, proxyUrl, ...rest);
+        }}
+    }};
+
+    // Intercept link clicks
+    document.addEventListener("click", function(e) {{
+        const t = e.target.closest("a[href]");
+        if (t && !t.href.startsWith("data:")) {{
+            e.preventDefault();
+            window.location.href = rewrite(t.getAttribute("href"));
+        }}
+    }});
+
+    // Patch window.open
+    const origOpen = window.open;
+    window.open = function(u, ...args) {{
+        return origOpen(rewrite(u), ...args);
+    }};
+
+    // Patch push/replace state
+    const origPush = history.pushState;
+    const origReplace = history.replaceState;
+    history.pushState = function(s, t, u) {{
+        return origPush.call(this, s, t, rewrite(u));
+    }};
+    history.replaceState = function(s, t, u) {{
+        return origReplace.call(this, s, t, rewrite(u));
+    }};
+}})();
+</script>
+"""
+
 def rewrite_html(html, base_url):
     soup = BeautifulSoup(html, "html.parser")
 
@@ -50,42 +110,9 @@ def rewrite_html(html, base_url):
                 script.string
             )
 
-    # Inject proxy JS
-    proxy_js = """
-    <script>
-    (function() {
-        const base = "/?url=";
-        const rewrite = u => base + encodeURIComponent(new URL(u, location.href).href);
-
-        // Intercept links
-        document.addEventListener("click", function(e) {
-            const t = e.target.closest("a[href]");
-            if (t && !t.href.startsWith("data:")) {
-                e.preventDefault();
-                window.location.href = rewrite(t.getAttribute("href"));
-            }
-        });
-
-        // Patch window.open
-        const origOpen = window.open;
-        window.open = function(u, ...args) {
-            return origOpen(rewrite(u), ...args);
-        };
-
-        // Patch push/replace state
-        const origPush = history.pushState;
-        const origReplace = history.replaceState;
-        history.pushState = function(s, t, u) {
-            return origPush.call(this, s, t, rewrite(u));
-        };
-        history.replaceState = function(s, t, u) {
-            return origReplace.call(this, s, t, rewrite(u));
-        };
-    })();
-    </script>
-    """
+    # Inject smart proxy JS
     if soup.head:
-        soup.head.insert(0, BeautifulSoup(proxy_js, "html.parser"))
+        soup.head.insert(0, BeautifulSoup(inject_proxy_script(base_url), "html.parser"))
 
     return str(soup)
 
