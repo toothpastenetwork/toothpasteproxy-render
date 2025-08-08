@@ -1,25 +1,26 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from urllib.parse import urljoin, quote, unquote
-from utils.cache import get_or_render_cached
-from utils.browser import get_browser
 from bs4 import BeautifulSoup
 import re
-import asyncio
+from utils.renderer import render_page
 
 app = FastAPI()
 
-PREWARM_URLS = [
-    "https://example.com",
-    "https://en.wikipedia.org/wiki/Main_Page",
-]
+@app.get("/", response_class=HTMLResponse)
+async def proxy(request: Request):
+    target = request.query_params.get("url")
+    if not target:
+        return "<h2>Proxy online — use ?url=https://example.com</h2>"
 
-@app.on_event("startup")
-async def warm_up():
-    await get_browser()
-    print("✅ Browser warmed.")
-    for url in PREWARM_URLS:
-        asyncio.create_task(get_or_render_cached(url))
+    target = unquote(target.strip())
+    try:
+        html = await render_page(target)
+        rewritten = rewrite_html(html, target)
+        return HTMLResponse(content=rewritten, media_type="text/html")
+    except Exception as e:
+        return HTMLResponse(content=f"<pre>Proxy error:\n{e}</pre>", media_type="text/html")
+
 
 def rewrite_url(base_url, url):
     if not url or url.startswith(("data:", "javascript:")):
@@ -27,70 +28,11 @@ def rewrite_url(base_url, url):
     full = urljoin(base_url, url)
     return "/?url=" + quote(full)
 
-def inject_proxy_script(base_url):
-    return f"""
-<script>
-(function() {{
-    const PROXY = "/?url=";
-    const rewrite = (u) => PROXY + encodeURIComponent(new URL(u, "{base_url}").href);
-
-    // Smart fetch override
-    const originalFetch = window.fetch;
-    window.fetch = function(input, init) {{
-        const url = typeof input === 'string' ? input : input.url;
-        return originalFetch(input, init).catch(err => {{
-            if (err instanceof TypeError && err.message.includes("Failed to fetch")) {{
-                console.warn("🔁 Retrying via proxy:", url);
-                return originalFetch(rewrite(url), init);
-            }}
-            throw err;
-        }});
-    }};
-
-    // Smart XHR override
-    const originalOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(method, url, ...rest) {{
-        try {{
-            return originalOpen.call(this, method, url, ...rest);
-        }} catch (e) {{
-            const proxyUrl = rewrite(url);
-            console.warn("🔁 Retrying XHR via proxy:", url);
-            return originalOpen.call(this, method, proxyUrl, ...rest);
-        }}
-    }};
-
-    // Intercept link clicks
-    document.addEventListener("click", function(e) {{
-        const t = e.target.closest("a[href]");
-        if (t && !t.href.startsWith("data:")) {{
-            e.preventDefault();
-            window.location.href = rewrite(t.getAttribute("href"));
-        }}
-    }});
-
-    // Patch window.open
-    const origOpen = window.open;
-    window.open = function(u, ...args) {{
-        return origOpen(rewrite(u), ...args);
-    }};
-
-    // Patch push/replace state
-    const origPush = history.pushState;
-    const origReplace = history.replaceState;
-    history.pushState = function(s, t, u) {{
-        return origPush.call(this, s, t, rewrite(u));
-    }};
-    history.replaceState = function(s, t, u) {{
-        return origReplace.call(this, s, t, rewrite(u));
-    }};
-}})();
-</script>
-"""
 
 def rewrite_html(html, base_url):
     soup = BeautifulSoup(html, "html.parser")
 
-    # Rewriting elements
+    # Basic tag rewrites
     for tag, attr in {
         "a": "href", "img": "src", "script": "src", "link": "href",
         "iframe": "src", "form": "action"
@@ -101,7 +43,7 @@ def rewrite_html(html, base_url):
             if tag == "form":
                 t["method"] = "get"
 
-    # Rewrite JS-based redirects
+    # Rewrite inline JS redirects
     for script in soup.find_all("script"):
         if script.string:
             script.string = re.sub(
@@ -110,22 +52,37 @@ def rewrite_html(html, base_url):
                 script.string
             )
 
-    # Inject smart proxy JS
+    # Inject fallback CORS proxy JS
+    inject_script = f"""
+<script>
+(function() {{
+    const proxy = '/?url=';
+    const rewrite = (u) => proxy + encodeURIComponent(new URL(u, '{base_url}').href);
+
+    window.fetch = new Proxy(window.fetch, {{
+        apply(target, thisArg, args) {{
+            return target(...args).catch(err => {{
+                const url = args[0];
+                if (typeof url === 'string' && !url.startsWith(proxy)) {{
+                    return target(rewrite(url), args[1]);
+                }}
+                throw err;
+            }});
+        }}
+    }});
+
+    const origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url, ...rest) {{
+        try {{
+            return origOpen.call(this, method, url, ...rest);
+        }} catch {{
+            return origOpen.call(this, method, proxy + encodeURIComponent(url), ...rest);
+        }}
+    }};
+}})();
+</script>
+"""
     if soup.head:
-        soup.head.insert(0, BeautifulSoup(inject_proxy_script(base_url), "html.parser"))
+        soup.head.insert(0, BeautifulSoup(inject_script, "html.parser"))
 
     return str(soup)
-
-@app.get("/", response_class=HTMLResponse)
-async def proxy(request: Request):
-    target = request.query_params.get("url")
-    if not target:
-        return "<h2>The proxy is online. Use ?url=https://example.com</h2>"
-
-    target = unquote(target)
-    try:
-        html = await get_or_render_cached(target)
-        rewritten = rewrite_html(html, target)
-        return HTMLResponse(content=rewritten, media_type="text/html")
-    except Exception as e:
-        return HTMLResponse(content=f"<pre>Proxy error:\n{e}</pre>", media_type="text/html")
